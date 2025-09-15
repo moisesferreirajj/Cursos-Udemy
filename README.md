@@ -1,6 +1,6 @@
 # 🎓 Cursos Udemy
 
-Repositório dedicado para listar e organizar os cursos que já concluí na **Udemy**.  
+Repositório dedicado para listar e organizar os cursos que já concluí ou estou fazendo na **Udemy**.  
 Aqui registro meu progresso de aprendizado, principais tópicos estudados e links de referência.  
 
 ---
