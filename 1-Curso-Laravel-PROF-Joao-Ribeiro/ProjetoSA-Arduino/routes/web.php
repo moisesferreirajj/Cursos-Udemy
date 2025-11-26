@@ -4,14 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\RelatoriosController;
 use App\Http\Controllers\RastreamentoController;
-
-/*
-|--------------------------------------------------------------------------
-| ROTAS WEB - SmartLOG
-|--------------------------------------------------------------------------
-| Estrutura organizada seguindo os controllers e views criados
-|--------------------------------------------------------------------------
-*/
+use App\Http\Controllers\GerenciarController;
 
 // ============================================
 // PÁGINA INICIAL
@@ -30,90 +23,64 @@ Route::get('/dashboard', [DashboardController::class, 'index'])
 // RELATÓRIOS
 // ============================================
 Route::controller(RelatoriosController::class)->group(function () {
-    // Página principal de relatórios
-    Route::get('/relatorios', 'index')
-        ->name('relatorios');
-    
-    // Exportações
-    Route::get('/relatorios/export-pdf', 'exportPdf')
-        ->name('relatorios.export.pdf');
-    
-    Route::get('/relatorios/export-excel', 'exportExcel')
-        ->name('relatorios.export.excel');
+    Route::get('/relatorios', 'index')->name('relatorios');
+    Route::get('/relatorios/export-pdf', 'exportPdf')->name('relatorios.export.pdf');
+    Route::get('/relatorios/export-excel', 'exportExcel')->name('relatorios.export.excel');
 });
 
 // ============================================
 // RASTREAMENTO
 // ============================================
 Route::controller(RastreamentoController::class)->group(function () {
-    // Página principal de rastreamento
-    Route::get('/rastreamento', 'index')
-        ->name('rastreamento');
+    Route::get('/rastreamento', 'index')->name('rastreamento');
 });
 
-/*
-|--------------------------------------------------------------------------
-| API ROUTES - ESP32
-|--------------------------------------------------------------------------
-| Rotas para comunicação com ESP32 e RFID
-|--------------------------------------------------------------------------
-*/
-
-Route::prefix('api')->group(function () {
+// ============================================
+// GERENCIAR - READERS E TAGS
+// ============================================
+Route::controller(GerenciarController::class)->prefix('gerenciar')->group(function () {
     
-    // ============================================
-    // API RFID (ESP32)
-    // ============================================
+    // === READERS ===
+    Route::get('/readers', 'indexReaders')->name('gerenciar.readers.index');
+    Route::get('/readers/create', 'createReader')->name('gerenciar.readers.create');
+    Route::post('/readers', 'storeReader')->name('gerenciar.readers.store');
+    Route::get('/readers/{id}/edit', 'editReader')->name('gerenciar.readers.edit');
+    Route::put('/readers/{id}', 'updateReader')->name('gerenciar.readers.update');
+    Route::delete('/readers/{id}', 'destroyReader')->name('gerenciar.readers.destroy');
+    
+    // === TAGS ===
+    Route::get('/tags', 'indexTags')->name('gerenciar.tags.index');
+    Route::get('/tags/create', 'createTag')->name('gerenciar.tags.create');
+    Route::post('/tags', 'storeTag')->name('gerenciar.tags.store');
+    Route::get('/tags/{id}/edit', 'editTag')->name('gerenciar.tags.edit');
+    Route::put('/tags/{id}', 'updateTag')->name('gerenciar.tags.update');
+    Route::delete('/tags/{id}', 'destroyTag')->name('gerenciar.tags.destroy');
+});
+
+// ============================================
+// API ROUTES
+// ============================================
+Route::prefix('api')->group(function () {
     Route::controller(DashboardController::class)->prefix('rfid')->group(function () {
-        // Receber leituras do ESP32
         Route::post('/reading', 'storeReading');
-        
-        // Estatísticas em tempo real
         Route::get('/stats', 'getRealtimeStats');
-        
-        // Leituras recentes
         Route::get('/recent', 'getRecentReadings');
     });
     
-    // ============================================
-    // API RELATÓRIOS
-    // ============================================
     Route::controller(RelatoriosController::class)->prefix('relatorios')->group(function () {
-        // Resumo por período (today, week, month, year)
         Route::get('/summary', 'summary');
-        
-        // Comparar múltiplas tags
         Route::get('/compare', 'compare');
     });
     
-    // ============================================
-    // API RASTREAMENTO
-    // ============================================
     Route::controller(RastreamentoController::class)->prefix('rastreamento')->group(function () {
-        // Localização atual de uma tag
         Route::get('/current-location', 'getCurrentLocation');
-        
-        // Histórico de movimentações
         Route::get('/movement-history', 'getMovementHistory');
-        
-        // Rastrear múltiplas tags
         Route::get('/track-multiple', 'trackMultiple');
-        
-        // Buscar localização por IP do ESP32
         Route::get('/location-by-ip', 'getLocationByIp');
-        
-        // Todas localizações ativas (para mapa/heatmap)
         Route::get('/active-locations', 'getActiveLocations');
     });
 });
 
-/*
-|--------------------------------------------------------------------------
-| ROTAS AUXILIARES
-|--------------------------------------------------------------------------
-*/
-
-// Rota de teste (opcional - pode remover em produção)
 Route::get('/test', function () {
     return response()->json([
         'success' => true,
@@ -123,13 +90,6 @@ Route::get('/test', function () {
     ]);
 });
 
-/*
-|--------------------------------------------------------------------------
-| FALLBACK
-|--------------------------------------------------------------------------
-*/
-
-// Rota 404 personalizada (opcional)
 Route::fallback(function () {
     return response()->view('errors.404', [], 404);
 });

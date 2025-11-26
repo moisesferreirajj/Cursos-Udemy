@@ -1,314 +1,176 @@
-/*******************************************************************************
- * SmartLOG - Sistema RFID com ESP32-C6
- * 3 Leitores RFID + 1 Sensor Ultrassônico + 1 Buzzer + WiFi
- * 
- * CONFIGURAÇÃO SUPER FÁCIL - APENAS MUDE 3 LINHAS!
- ******************************************************************************/
-
-#include <WiFi.h>
-#include <HTTPClient.h>
-#include <ArduinoJson.h>
 #include <SPI.h>
 #include <MFRC522.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 
-// ==========================================
-// 🔧 MUDE APENAS ESTAS 3 LINHAS:
-// ==========================================
-const char* ssid = "SEU_WIFI";
-const char* password = "SUA_SENHA";
-const char* serverUrl = "http://192.168.1.100:8080/api/rfid/reading";
+// ===========================
+// RFID
+// ===========================
+#define SS_PIN    21
+#define RST_PIN   22
 
-// ==========================================
-// PINOS (JÁ CONFIGURADO - NÃO MUDE!)
-// ==========================================
-#define RST_PIN    8   // Reset
-#define RST_PIN_2    0   // Reset
-#define RST_PIN_3    22   // Reset
-#define SS_PIN_1   13   // RFID 1 - Entrada
-#define SS_PIN_2   1   // RFID 2 - Produção
-#define SS_PIN_3   16   // RFID 3 - Expedição
+MFRC522 rfid(SS_PIN, RST_PIN);
 
-#define TRIG_PIN   25   // Ultrassônico TRIG
-#define ECHO_PIN   26   // Ultrassônico ECHO
-#define BUZZER_PIN 27   // Buzzer
+// ===========================
+// LED + BUZZER
+// ===========================
+#define LED_VERDE 14
+#define BUZZER    25
 
-// ==========================================
-// OBJETOS RFID
-// ==========================================
-MFRC522 leitor1(SS_PIN_1, RST_PIN);
-MFRC522 leitor2(SS_PIN_2, RST_PIN_2);
-MFRC522 leitor3(SS_PIN_3, RST_PIN_3);
+// ===========================
+// WIFI
+// ===========================
+const char* ssid = "mark";
+const char* password = "mark1234";
 
-// ==========================================
-// SETORES
-// ==========================================
-struct Setor {
-  const char* nome;
-  const char* reader_id;
-  const char* status;
-};
+// ===========================
+// API
+// ===========================
+String apiURL = "http://10.200.222.127:8080/api/rfid/reading";
 
-Setor setores[3] = {
-  {"Entrada Principal", "READER_ENTRADA", "entrada"},
-  {"Setor de Produção", "READER_PRODUCAO", "movimentacao"},
-  {"Expedição/Saída", "READER_EXPEDICAO", "saida"}
-};
+// ===========================
+// SIMULAÇÃO DE READERS
+// ===========================
+String readers[3] = { "READER_001", "READER_002", "READER_003" };
+String tipos[3]   = { "entrada", "movimentacao", "saida" };
+int readerIndex = 0;
 
-// ==========================================
-// VARIÁVEIS DE CONTROLE
-// ==========================================
-unsigned long lastReadTime = 0;
-const unsigned long readInterval = 2000;
-String ultimaTagLida = "";
-int ultimoSetor = -1;
-
-// ==========================================
+// ===========================
 // SETUP
-// ==========================================
+// ===========================
 void setup() {
   Serial.begin(115200);
-  delay(1000);
+  delay(300);
 
-  Serial.println("\n╔════════════════════════════════════════╗");
-  Serial.println("║   SmartLOG - Sistema RFID ESP32-C6    ║");
-  Serial.println("║   3 Leitores + Ultrassônico + Buzzer  ║");
-  Serial.println("╚════════════════════════════════════════╝\n");
+  pinMode(LED_VERDE, OUTPUT);
+  pinMode(BUZZER, OUTPUT);
 
-  // Configurar pinos
-  pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(TRIG_PIN, OUTPUT);
-  pinMode(ECHO_PIN, INPUT);
+  digitalWrite(LED_VERDE, LOW);
+  digitalWrite(BUZZER, LOW);
 
-  // Teste do buzzer
-  Serial.println("🔊 Testando buzzer...");
-  bip(2, 100, 1500);
-  Serial.println("   ✓ Buzzer OK\n");
+  // RFID
+  SPI.begin(18, 19, 23);
+  rfid.PCD_Init();
 
-  // Inicializar SPI
-  SPI.begin();
-  Serial.println("⚙️  Inicializando SPI...");
-
-  // Inicializar leitores RFID
-  Serial.println("📡 Inicializando leitores RFID...");
-  leitor1.PCD_Init();
-  delay(100);
-  leitor2.PCD_Init();
-  delay(100);
-  leitor3.PCD_Init();
-  delay(100);
-
-  Serial.println("   ✓ Leitor 1: Entrada Principal");
-  Serial.println("   ✓ Leitor 2: Setor de Produção");
-  Serial.println("   ✓ Leitor 3: Expedição/Saída\n");
-
-  // Conectar WiFi
-  connectWiFi();
-
-  Serial.println("✅ Sistema pronto! Aproxime uma tag...\n");
-  bip(3, 100, 2000);
-}
-
-// ==========================================
-// LOOP PRINCIPAL
-// ==========================================
-void loop() {
-  // Verificar WiFi
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("⚠️  WiFi desconectado! Reconectando...");
-    connectWiFi();
-  }
-
-  // Verificar distância
-  verificarDistancia();
-
-  // Ler RFID
-  if (millis() - lastReadTime >= readInterval) {
-    lerTodosLeitores();
-    lastReadTime = millis();
-  }
-
-  delay(50);
-}
-
-// ==========================================
-// CONECTAR WIFI
-// ==========================================
-void connectWiFi() {
-  Serial.print("📡 Conectando ao WiFi: ");
-  Serial.println(ssid);
-
-  WiFi.mode(WIFI_STA);
+  // WIFI
   WiFi.begin(ssid, password);
-
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-    delay(500);
+  Serial.print("Conectando WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
     Serial.print(".");
-    attempts++;
+    delay(500);
   }
+  Serial.println("\n[OK] WiFi conectado!");
+  Serial.println("IP: " + WiFi.localIP().toString());
 
-  Serial.println();
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("✓ WiFi conectado!");
-    Serial.print("   IP: ");
-    Serial.println(WiFi.localIP());
-    Serial.print("   Sinal: ");
-    Serial.print(WiFi.RSSI());
-    Serial.println(" dBm\n");
-    bip(2, 100, 1800);
-  } else {
-    Serial.println("✗ Falha ao conectar WiFi!\n");
-    bip(3, 200, 500);
-  }
+  Serial.println("\n=== RFID ATIVO NO SDA 21 ===");
+  Serial.println("Simulando READER_001 → READER_002 → READER_003");
+  Serial.println("Aproxime uma TAG...\n");
 }
 
-// ==========================================
-// LER TODOS OS LEITORES
-// ==========================================
-void lerTodosLeitores() {
-  if (lerRFID(leitor1, 0)) return;
-  if (lerRFID(leitor2, 1)) return;
-  if (lerRFID(leitor3, 2)) return;
-}
-
-// ==========================================
-// LER RFID
-// ==========================================
-bool lerRFID(MFRC522 &leitor, int setorIndex) {
-  if (!leitor.PICC_IsNewCardPresent() || !leitor.PICC_ReadCardSerial()) {
-    return false;
-  }
-
-  // Ler ID da tag
-  String tagID = "";
-  for (byte i = 0; i < leitor.uid.size; i++) {
-    tagID += String(leitor.uid.uidByte[i], HEX);
-  }
-  tagID.toLowerCase();
-
-  // Evitar duplicação
-  if (tagID == ultimaTagLida && setorIndex == ultimoSetor) {
-    leitor.PICC_HaltA();
-    return false;
-  }
-
-  ultimaTagLida = tagID;
-  ultimoSetor = setorIndex;
-
-  Serial.println("\n═══════════════════════════════════════");
-  Serial.println("🏷️  TAG DETECTADA!");
-  Serial.println("═══════════════════════════════════════");
-  Serial.print("Tag ID: ");
-  Serial.println(tagID);
-  Serial.print("Setor: ");
-  Serial.println(setores[setorIndex].nome);
-  Serial.println("Status: ✓ TAG LIDA");
-
-  acessoPermitido();
-  enviarParaServidor(tagID, setorIndex);
-
-  Serial.println("═══════════════════════════════════════\n");
-
-  leitor.PICC_HaltA();
-  return true;
-}
-
-// ==========================================
-// VERIFICAR DISTÂNCIA
-// ==========================================
-void verificarDistancia() {
-  static unsigned long lastCheck = 0;
-  if (millis() - lastCheck < 500) return;
-  lastCheck = millis();
-
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
-
-  long duracao = pulseIn(ECHO_PIN, HIGH, 30000);
-  long distancia = duracao * 0.034 / 2;
-
-  if (distancia <= 0 || distancia > 400) return;
-
-  // Alertas de proximidade
-  if (distancia < 10) {
-    tone(BUZZER_PIN, 2000, 50);
-  } else if (distancia < 20) {
-    if (millis() % 200 < 50) tone(BUZZER_PIN, 1500, 50);
-  } else if (distancia < 40) {
-    if (millis() % 500 < 50) tone(BUZZER_PIN, 1000, 50);
-  } else if (distancia < 60) {
-    if (millis() % 1000 < 50) tone(BUZZER_PIN, 800, 50);
-  }
-}
-
-// ==========================================
-// ENVIAR PARA SERVIDOR
-// ==========================================
-void enviarParaServidor(String tagID, int setorIndex) {
+// ===========================
+// Função: Enviar leitura para API Laravel
+// ===========================
+void sendToAPI(String uid, String readerID, String status) {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("✗ Sem WiFi - Não enviado");
+    Serial.println("[ERRO] Sem WiFi!");
     return;
   }
 
   HTTPClient http;
-  http.begin(serverUrl);
+  http.setTimeout(15000);
+  http.setConnectTimeout(8000);
+  
+  http.begin(apiURL);
   http.addHeader("Content-Type", "application/json");
-  http.setTimeout(10000);
+  http.addHeader("Accept", "application/json");
 
-  StaticJsonDocument<512> doc;
-  doc["tag_id"] = tagID;
-  doc["reader_id"] = setores[setorIndex].reader_id;
-  doc["location"] = setores[setorIndex].nome;
-  doc["product_name"] = "Produto-" + tagID;
-  doc["product_code"] = "PROD-" + tagID;
-  doc["status"] = setores[setorIndex].status;
-  doc["temperature"] = random(180, 280) / 10.0;
-  doc["signal_strength"] = random(60, 100);
-  doc["notes"] = "Leitura ESP32-C6";
+  String json = "{";
+  json += "\"tag_id\":\"" + uid + "\",";
+  json += "\"reader_id\":\"" + readerID + "\",";
+  json += "\"status\":\"" + status + "\"";
+  json += "}";
 
-  String jsonString;
-  serializeJson(doc, jsonString);
+  Serial.println("===============================");
+  Serial.println("Enviando para API:");
+  Serial.println("JSON: " + json);
+  Serial.println("-------------------------------");
 
-  Serial.println("📤 Enviando para servidor...");
-
-  int httpCode = http.POST(jsonString);
+  int httpCode = http.POST(json);
 
   if (httpCode > 0) {
-    Serial.print("✓ HTTP ");
+    Serial.print("[OK] HTTP Code: ");
     Serial.println(httpCode);
-
-    if (httpCode == 200 || httpCode == 201) {
-      Serial.println("✓ Dados enviados com sucesso!");
-      bip(2, 100, 1500);
-    } else {
-      Serial.println("⚠ Enviado mas com aviso");
-      bip(1, 300, 800);
+    
+    if (httpCode == 201) {
+      String response = http.getString();
+      Serial.println("[SUCESSO] Leitura registrada!");
+      Serial.println("Resposta: " + response);
+      
+      // Feedback positivo
+      digitalWrite(LED_VERDE, HIGH);
+      tone(BUZZER, 2500, 100);
+      delay(500);
+      noTone(BUZZER);
+      tone(BUZZER, 3000, 100);
+      digitalWrite(LED_VERDE, LOW);
     }
+    
   } else {
-    Serial.print("✗ Erro: ");
-    Serial.println(http.errorToString(httpCode));
-    bip(3, 200, 400);
+    Serial.println("[ERRO] Código: " + String(httpCode));
+    tone(BUZZER, 500, 200);
   }
 
+  Serial.println("===============================\n");
   http.end();
 }
+// ===========================
+// LOOP
+// ===========================
+void loop() {
 
-// ==========================================
-// EFEITOS SONOROS
-// ==========================================
-void acessoPermitido() {
-  bip(2, 100, 1500);
-}
+  if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
 
-void bip(int quantidade, int duracao, int frequencia) {
-  for (int i = 0; i < quantidade; i++) {
-    tone(BUZZER_PIN, frequencia, duracao);
-    delay(duracao);
-    delay(duracao);
+    // UID sem espaços
+    String uid = "";
+    for (byte i = 0; i < rfid.uid.size; i++) {
+      if (rfid.uid.uidByte[i] < 0x10) uid += "0";
+      uid += String(rfid.uid.uidByte[i], HEX);
+    }
+    uid.toUpperCase();
+
+    String readerName = readers[readerIndex];
+    String status = tipos[readerIndex];
+
+    Serial.println("\n*** TAG DETECTADA ***");
+    Serial.print("Reader: ");
+    Serial.println(readerName);
+    Serial.print("TAG UID: ");
+    Serial.println(uid);
+    Serial.print("Status: ");
+    Serial.println(status);
+
+    // LED + buzzer (feedback imediato)
+    digitalWrite(LED_VERDE, HIGH);
+    tone(BUZZER, 2000, 120);
+    delay(550);
+    digitalWrite(LED_VERDE, LOW);
+
+    // Aguarda um pouco antes de enviar
+    delay(300);
+
+    // Envia para API
+    sendToAPI(uid, readerName, status);
+
+    // Próximo leitor
+    readerIndex++;
+    if (readerIndex >= 3) readerIndex = 0;
+
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    
+    // Aguarda antes de permitir nova leitura
+    delay(2000);
   }
-  noTone(BUZZER_PIN);
+
+  delay(80);
 }

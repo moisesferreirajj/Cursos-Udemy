@@ -98,45 +98,68 @@ class DashboardController extends Controller
         // Tentar obter localização aproximada do IP
         $locationFromIp = $this->getLocationFromIp($ipAddress);
 
-        // Verificar/criar leitor se não existir
-        $reader = RfidReader::firstOrCreate(
+        // Atualizar/criar reader
+        $reader = RfidReader::updateOrCreate(
             ['reader_id' => $validated['reader_id']],
             [
                 'name' => 'Leitor ' . $validated['reader_id'],
                 'location' => $locationFromIp ?: ($validated['location'] ?? 'Não especificado'),
                 'ip_address' => $ipAddress,
                 'status' => 'online',
+                'last_ping' => now(),
             ]
         );
 
-        // Atualizar ping e localização do leitor
-        $reader->update([
-            'last_ping' => now(),
-            'status' => 'online',
-            'ip_address' => $ipAddress,
-            'location' => $locationFromIp ?: $reader->location,
-        ]);
-
-        // Verificar/criar tag se não existir
+        // ===================================================
+        // CORRIGIDO: Verificar/criar TAG sem sobrescrever
+        // ===================================================
         if (!empty($validated['tag_id'])) {
-            RfidTag::firstOrCreate(
-                ['tag_id' => $validated['tag_id']],
-                [
+            $existingTag = RfidTag::where('tag_id', $validated['tag_id'])->first();
+            
+            if (!$existingTag) {
+                // TAG NÃO EXISTE - Criar nova
+                RfidTag::create([
+                    'tag_id' => $validated['tag_id'],
                     'product_name' => $validated['product_name'] ?? 'Produto ' . $validated['tag_id'],
                     'product_code' => $validated['product_code'] ?? null,
                     'type' => 'produto',
                     'status' => 'ativo',
-                ]
-            );
+                ]);
+            }
         }
 
-        // Criar leitura
+        // ===================================================
+        // NOVO: Buscar dados da TAG se não fornecidos
+        // ===================================================
+        $productName = $validated['product_name'] ?? null;
+        $productCode = $validated['product_code'] ?? null;
+        
+        // Se product_name ou product_code forem null/vazios, buscar da tabela rfid_tags
+        if (empty($productName) || empty($productCode)) {
+            $tag = RfidTag::where('tag_id', $validated['tag_id'])->first();
+            
+            if ($tag) {
+                // Se não foi enviado product_name, pega da TAG
+                if (empty($productName)) {
+                    $productName = $tag->product_name;
+                }
+                
+                // Se não foi enviado product_code, pega da TAG
+                if (empty($productCode)) {
+                    $productCode = $tag->product_code;
+                }
+            }
+        }
+
+        // ===================================================
+        // SEMPRE criar nova leitura com dados da TAG
+        // ===================================================
         $reading = RfidReading::create([
             'tag_id' => $validated['tag_id'],
             'reader_id' => $validated['reader_id'],
             'location' => $locationFromIp ?: ($validated['location'] ?? $reader->location),
-            'product_name' => $validated['product_name'] ?? null,
-            'product_code' => $validated['product_code'] ?? null,
+            'product_name' => $productName, // ← Usa nome da TAG se não foi enviado
+            'product_code' => $productCode, // ← Usa código da TAG se não foi enviado
             'status' => $validated['status'] ?? 'movimentacao',
             'temperature' => $validated['temperature'] ?? null,
             'signal_strength' => $validated['signal_strength'] ?? null,
@@ -147,7 +170,15 @@ class DashboardController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Leitura registrada com sucesso',
-            'data' => $reading,
+            'data' => [
+                'reading_id' => $reading->id,
+                'tag_id' => $reading->tag_id,
+                'reader_id' => $reading->reader_id,
+                'product_name' => $reading->product_name,
+                'product_code' => $reading->product_code,
+                'status' => $reading->status,
+                'timestamp' => $reading->read_at,
+            ],
             'ip_address' => $ipAddress,
             'location' => $locationFromIp,
         ], 201);
